@@ -338,14 +338,13 @@ class MainWindow(QMainWindow):
         self._model = self._create_model(self._train_dict)
 
     #現在のサンプルデータからSVMモデルを生成する
-    def _create_model(self, train, param="-t 1"):
-        if train:
+    def _create_model(self, sample, param="-t 1"):
+        if sample:
             labels = []
             data = []
-            items = train.items()
-            for i, (_, t) in enumerate(sorted(items)):
-                labels.extend([i] * len(t))
-                data.extend(t)
+            for i, (_, train) in enumerate(sorted(sample.items())):
+                labels.extend([i] * len(train))
+                data.extend(train)
             p = svm_parameter(param)
             prob = svm_problem(labels, data)
             return svm_train(prob, p)
@@ -377,10 +376,10 @@ class MainWindow(QMainWindow):
     def _connect_BT(self):
         self._BT_device = lb.selectdevice()
         if self._BT_device:
-            device_id, device_name, _ = self._BT_device
+            device_address, device_name, _ = self._BT_device
             self._BT_state.setText(device_name)
             self._socket = lb.socket()
-            self._socket.connect((device_id, 3))
+            self._socket.connect((device_address, 25))
             self._socket.send("connected")
 
 
