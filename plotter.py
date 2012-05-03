@@ -17,7 +17,7 @@ class Plotter(QGLWidget):
         super(Plotter, self).__init__(parent)
         
         self._data = []
-        self.setMinimumSize(1000,300)
+        self.setMinimumSize(1100,300)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.plot_range = plot_range
         self.ismel = ismel
@@ -25,9 +25,9 @@ class Plotter(QGLWidget):
         self.grid_width = 1
         self.plot_width = 2
         self.plot_color_table = [
-                (1, 0.619, 0.239),
-                (0.239, 0.619, 1),
-                (1, 0, 0)
+                (0.24, 0.62, 1),
+                (0.5, 0.31, 0.12),
+                (0.62, 1, 0.24),
                 ]
 
     def initializeGL(self):

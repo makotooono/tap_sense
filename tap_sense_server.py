@@ -32,7 +32,7 @@ class SmoothBar(QProgressBar):
         else:
             filterd_value = max(self.minimum(),
                     self.value() - self.maximum() * 0.01 * self._acc)
-            self._acc += 0.1
+            self._acc += 0.3
         super(SmoothBar, self).setValue(filterd_value)
         
 
@@ -64,9 +64,14 @@ class MainWindow(QMainWindow):
         self._input_combo.setCurrentIndex(0)
 
         #各バッファの初期化
+        self._success_buf = [False] * 3
         self._init_buffers()
+        self._socket = None
+        self._BT_ID = '2C:30:68:88:05:EE';
+        self._connect_BT()
 
         #プロセスタイマー始動
+        #thread.start_new_thread(self._wave_update_thread, ())
         self._timer = QTimer()
         self._timer.timeout.connect(self._process)
         self._timer.start(0)
@@ -114,8 +119,9 @@ class MainWindow(QMainWindow):
                     self._input.read(self._sample_size)
                     )
             wave = map(lambda x: x/32768., wave_int16)
-        except IOError:
+        except (IOError, AttributeError):
             wave = None
+            print "this frame is invalid."
         return wave
 
 
@@ -126,18 +132,17 @@ class MainWindow(QMainWindow):
         self._peak_wave_cands.pop(0)
         self._peak_cands.append(volume)
         self._peak_wave_cands.append(self._wave)
-
         p_cands = self._peak_cands
-        if p_cands[1] > 0.01 and p_cands[0] < p_cands[1] > p_cands[2]:
+        if p_cands[1] > 0.04 and p_cands[0] < p_cands[1] > p_cands[2]:
             is_peak = True
             pwc = np.array(self._peak_wave_cands)
             connected = pwc.flatten()
             norm = lambda x: x / np.amax(x)
-            offs =  int(np.where(norm(pwc[1]) > 0.3)[0][0])
-            pre = n / 4
+            offs = int(np.where(norm(pwc[1]) > 0.3)[0][0]) + n
+            pre = n / 3
             post = n - pre
-            left = n + offs - pre
-            right = n + offs + post
+            left = offs - pre
+            right = offs + post
             self._peak_wave = norm(connected[left:right]).tolist()
             self._peak_spectle = wave2spectle(self._peak_wave)
         else:
@@ -150,28 +155,28 @@ class MainWindow(QMainWindow):
         n = self._sample_size
         #入力信号の取得
         wave = self._get_wave()
-        if not wave:  # 波形の取得に失敗したらなにもしない
+        if not wave:
             return
 
         #ボリュームを求める
         volume = max(map(lambda x: abs(x), wave))
 
         #全体波形の更新
-        self._wave = self._wave[len(wave):] + wave
+        self._wave = wave
 
         #スペクトルを求める
         self._spectle = wave2spectle(self._wave)
 
         #タッチの検出
         is_peak = self._update_peak(volume)
-        if is_peak:
+        if is_peak: 
             debug = self._debug_edit
             debug.clear()
 
             #学習データの追加
             if self._train_action.isChecked():
                 current_label = self._train_combo.currentText()
-                self._train_dict[current_label].append(self._peak_spectle)
+                self._train_dict[current_label].append(self._peak_spectle[:n/2])
                 #各学習回数を表示
                 for i in range(self._train_combo.count()):
                     label = self._train_combo.itemText(i)
@@ -180,23 +185,24 @@ class MainWindow(QMainWindow):
 
             #タッチパターンの予測
             if self._predict_action.isChecked() and self._model:
-                result = svm_predict([0], [self._peak_spectle], self._model)
+                result = svm_predict([0], [self._peak_spectle[:n/2]], self._model)
                 judge = self._train_combo.itemText(int(result[0][0]))
                 #予測結果の表示
                 debug.append(str(result))
                 debug.append(judge)
+                if self._socket:
+                    self._socket.send(judge.encode('ascii'))
 
         
         #表示の更新
         self._volume_bar.setValue(volume * self._volume_bar.maximum())
         self._wave_viewer.remove_all()
         self._spectle_viewer.remove_all()
-        self._wave_viewer.add_data(self._wave)
         self._wave_viewer.add_data(self._peak_wave)
-        self._spectle_viewer.add_data(zip(self._xs, self._spectle[:n/2]))
         self._spectle_viewer.add_data(zip(self._xs, self._peak_spectle[:n/2]))
         self._wave_viewer.update()
         self._spectle_viewer.update()
+        
 
     def _setup_ui(self):
         #ボリューム表示用のバー
@@ -336,9 +342,10 @@ class MainWindow(QMainWindow):
         self._train_action.setChecked(False)
         self._predict_action.setChecked(True)
         self._model = self._create_model(self._train_dict)
-
+        print self._model.get_SV()
+ 
     #現在のサンプルデータからSVMモデルを生成する
-    def _create_model(self, sample, param="-t 1"):
+    def _create_model(self, sample, param="-c 8.0 -g 0.001953125"):
         if sample:
             labels = []
             data = []
@@ -374,13 +381,32 @@ class MainWindow(QMainWindow):
     #bluetoothデバイスへの接続（テスト中）
     @Slot()
     def _connect_BT(self):
-        self._BT_device = lb.selectdevice()
+        """
+        self._BT_device = lb.selectservice()
         if self._BT_device:
-            device_address, device_name, _ = self._BT_device
-            self._BT_state.setText(device_name)
+            device_address, port, name = self._BT_device
+            self._BT_state.setText(name)
             self._socket = lb.socket()
-            self._socket.connect((device_address, 25))
-            self._socket.send("connected")
+            while 1:
+                try:
+                    self._socket.connect((device_address, port))
+                except:
+                    print "faild."
+                    break
+                else:
+                    break
+        """
+        try:
+            self._socket = lb.socket()
+            services = lb.findservices(self._BT_ID)
+            port = filter(lambda x: x[2] == u"BTHello", services)[0][1]
+            self._socket.connect((self._BT_ID, port))
+            self._BT_state.setText("connected")
+        except:
+            print "connect to " + self._BT_ID + "faild."
+            self._BT_state.setText("no connection")
+
+
 
 
 if __name__ == "__main__":
